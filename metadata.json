@@ -1,0 +1,5 @@
+{
+  "name": "UniTV Stream Clone",
+  "description": "A sophisticated IPTV and VOD streaming application inspired by UniTV, featuring M3U import, a robust player, EPG, and AI-powered recommendations. This platform provides a premium, polished user experience with a focus on visual aesthetics and fluid navigation.",
+  "requestFramePermissions": []
+}
