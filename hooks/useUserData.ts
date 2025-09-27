@@ -24,6 +24,12 @@ const storage = {
   }
 };
 
+// A list of public CORS proxies to try in sequence.
+const PROXY_URLS = [
+    `https://api.allorigins.win/raw?url=`,
+    `https://api.codetabs.com/v1/proxy?quest=` // Fallback proxy
+];
+
 export const useUserData = () => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => storage.get('isLoggedIn', false));
   const [m3uUrl, setM3uUrlState] = useState<string>(() => storage.get('m3uUrl', ''));
@@ -47,44 +53,64 @@ export const useUserData = () => {
 
     setIsLoading(true);
     setError(null);
-    try {
-      // Using a public CORS proxy for development. This is necessary because M3U hosts often don't set CORS headers.
-      // Switched from cors-anywhere to allorigins for better reliability.
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      const response = await fetch(proxyUrl);
-      if (!response.ok) {
-        let errorMessage = `Failed to fetch playlist. Status: ${response.status}.`;
-        if (response.status === 403) {
-           errorMessage = `Access to the playlist was forbidden (Status: 403). The server may be blocking the CORS proxy.`;
-        } else if (response.status === 404) {
-           errorMessage = `Playlist not found at the provided URL (Status: 404). Please check the URL.`;
-        }
-        throw new Error(errorMessage);
-      }
-      const m3uData = await response.text();
-      if (!m3uData || !m3uData.trim().startsWith('#EXTM3U')) {
-        throw new Error("Invalid M3U data received. The file might be empty, not a valid playlist, or the proxy failed.");
-      }
+    let lastError: Error | null = null;
 
-      const { channels: parsedChannels, vodItems: parsedVODs } = parseM3U(m3uData);
-      setChannels(parsedChannels);
-      setVODItems(parsedVODs);
-    } catch (e) {
-      console.error("M3U Parsing Error:", e);
-      if (e instanceof Error) {
-        if (e.message.includes('Failed to fetch')) {
-            setError("Failed to fetch the playlist. This could be due to a network issue, an ad-blocker, or the CORS proxy service being temporarily unavailable. Please check your connection and try again.");
-        } else {
-            setError(e.message);
+    for (const proxy of PROXY_URLS) {
+        try {
+            const proxyUrl = `${proxy}${encodeURIComponent(url)}`;
+            const response = await fetch(proxyUrl);
+
+            if (!response.ok) {
+                // This is a specific HTTP error. It's unlikely a different proxy will fix a 404 or 403 on the target URL.
+                // We should fail fast and report this specific error.
+                let errorMessage = `Failed to fetch playlist. Status: ${response.status}.`;
+                if (response.status === 403) {
+                    errorMessage = `Access to the playlist was forbidden (Status: 403). The server may be blocking our proxy services.`;
+                } else if (response.status === 404) {
+                    errorMessage = `Playlist not found at the provided URL (Status: 404). Please check the URL.`;
+                }
+                throw new Error(errorMessage); // This will be caught and will become the final error.
+            }
+
+            const m3uData = await response.text();
+            if (!m3uData || !m3uData.trim().startsWith('#EXTM3U')) {
+                throw new Error("Invalid M3U data received. The file might be empty, not a valid playlist, or a proxy failed to return correct data.");
+            }
+
+            const { channels: parsedChannels, vodItems: parsedVODs } = parseM3U(m3uData);
+            setChannels(parsedChannels);
+            setVODItems(parsedVODs);
+            setError(null); // Clear previous errors on success
+            setIsLoading(false);
+            return; // Success! Exit the function.
+
+        } catch (e) {
+            console.warn(`M3U fetch failed with proxy ${proxy}.`, e);
+            if (e instanceof Error) {
+                lastError = e;
+                // If the error is NOT a generic network error (like "Failed to fetch"), we should stop trying other proxies.
+                if (!e.message.includes('Failed to fetch')) {
+                    break;
+                }
+            }
         }
-      } else {
-        setError("Could not load your playlist. An unknown error occurred.");
-      }
-      setChannels([]);
-      setVODItems([]);
-    } finally {
-      setIsLoading(false);
     }
+    
+    // If we've exited the loop, it means all attempts failed.
+    console.error("All proxies failed.", lastError);
+    if (lastError) {
+        if (lastError.message.includes('Failed to fetch')) {
+            setError("Failed to fetch the playlist. This could be due to a network issue, an ad-blocker, or our proxy services being temporarily unavailable. Please check your connection and try again.");
+        } else {
+            setError(lastError.message);
+        }
+    } else {
+        setError("Could not load your playlist. An unknown error occurred.");
+    }
+    
+    setChannels([]);
+    setVODItems([]);
+    setIsLoading(false);
   }, []);
 
   useEffect(() => {
