@@ -57,10 +57,11 @@ const PROXY_URL_BUILDERS = [
 ];
 
 const MOCK_VOD_METADATA = ${JSON.stringify(MOCK_VOD_METADATA)};
-const MOVIE_KEYWORDS = ['vod', 'filmes', 'movies', 'lançamentos', 'cinema', 'on demand', 'séries', 'series', 'documentários'];
+
+// --- REGEX AND KEYWORDS FOR CLASSIFICATION ---
 const SERIES_EPISODE_REGEX = /[Ss](\\d{1,2})[EeXx](\\d{1,2})/;
-const CHANNEL_KEYWORDS_REGEX = /(\\s24h|\\sSD|\\sHD|\\sFULL\\sHD|\\s4K)/i;
-const MOVIE_YEAR_REGEX = /\\((\\d{4})\\)/;
+const CHANNEL_GROUP_REGEX = /^\\[.*24H.*\\]/i;
+const CHANNEL_KEYWORDS_REGEX = /\\s(SD|HD|FHD|UHD|4K|FULL\\sHD)\\b/i;
 const VOD_EXTENSIONS = ['.mp4', '.mkv', '.avi'];
 
 
@@ -93,13 +94,11 @@ const parseM3UChunk = (chunk, partialLine, seriesMap) => {
             const rawGroup = groupTitleMatch ? groupTitleMatch[1] : 'General';
             const group = rawGroup.split('|').pop().trim();
 
-            const episodeMatch = rawName.match(SERIES_EPISODE_REGEX);
-            const channelMatch = CHANNEL_KEYWORDS_REGEX.test(rawName);
             const urlLower = url.toLowerCase();
-            const groupLower = rawGroup.toLowerCase();
+            const episodeMatch = rawName.match(SERIES_EPISODE_REGEX);
             
             if (episodeMatch) {
-                // Priority 1: It's a series episode
+                // Priority 1: It's a VOD series episode if it matches SxxExx format.
                 const season = parseInt(episodeMatch[1], 10);
                 const episode = parseInt(episodeMatch[2], 10);
                 const seriesName = rawName.replace(SERIES_EPISODE_REGEX, '').replace(/\\|/g, ' ').trim();
@@ -133,20 +132,20 @@ const parseM3UChunk = (chunk, partialLine, seriesMap) => {
                    });
                    series.seasons[season].sort((a,b) => a.episode - b.episode);
                 }
-            } else if (channelMatch) {
-                // Priority 2: It's a live channel based on keywords (24h, SD, HD, etc.)
-                channels.push({ id, name: rawName, logo, group, url });
-            } else if (
-                VOD_EXTENSIONS.some(ext => urlLower.endsWith(ext)) ||
-                MOVIE_KEYWORDS.some(keyword => groupLower.includes(keyword)) ||
-                MOVIE_YEAR_REGEX.test(rawName)
-            ) {
-                // Priority 3: It's a movie/VOD
-                const metadata = MOCK_VOD_METADATA[id] || { description: 'No description available.', year: 2020, genre: ['Unknown'] };
-                movies.push({ id, name: rawName, poster: logo, group, url, ...metadata });
             } else {
-                // Default: It's a live channel
-                channels.push({ id, name: rawName, logo, group, url });
+                // Priority 2: Check if it's a Live Channel.
+                const isLiveChannel =
+                    CHANNEL_GROUP_REGEX.test(rawGroup) ||
+                    CHANNEL_KEYWORDS_REGEX.test(rawName) ||
+                    !VOD_EXTENSIONS.some(ext => urlLower.endsWith(ext));
+
+                if (isLiveChannel) {
+                    channels.push({ id, name: rawName, logo, group, url });
+                } else {
+                    // Priority 3: If not a series episode or a live channel, it must be a Movie.
+                    const metadata = MOCK_VOD_METADATA[id] || { description: 'No description available.', year: 2020, genre: ['Unknown'] };
+                    movies.push({ id, name: rawName, poster: logo, group, url, ...metadata });
+                }
             }
             i++; // Skip URL line
         }

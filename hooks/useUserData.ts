@@ -212,7 +212,7 @@ const db = new PlaylistDB('UniTVDB');
 
 export const useUserData = () => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => storage.get('isLoggedIn', false));
-  const [m3uUrl, setM3uUrlState] = useState<string>(() => storage.get('m3uUrl', ''));
+  const [m3uUrl, setM3uUrlState] = useState<string>(() => storage.get('m3uUrl', 'http://cdntvz.lat/get.php?username=864748520662&password=870135116545&type=m3u_plus&output=hls'));
   const [favorites, setFavorites] = useState<Set<string>>(() => new Set(storage.get<string[]>('favorites', [])));
   const [history, setHistory] = useState<HistoryItem[]>(() => storage.get<HistoryItem[]>('history', []));
 

@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
     <style>
       body {
         font-family: 'Inter', sans-serif;
@@ -21,6 +21,20 @@
       .scrollbar-hide {
         -ms-overflow-style: none;
         scrollbar-width: none;
+      }
+      /* Style video.js player to match the app theme */
+      .video-js .vjs-control-bar {
+        background-color: rgba(18, 18, 22, 0.7) !important;
+      }
+      .video-js .vjs-progress-control .vjs-play-progress {
+        background-color: #a855f7 !important;
+      }
+      .video-js .vjs-big-play-button {
+        background-color: rgba(168, 85, 247, 0.7) !important;
+        border-color: rgba(168, 85, 247, 0.9) !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
       }
     </style>
   <script type="importmap">
@@ -39,6 +53,7 @@
 </head>
   <body>
     <div id="root"></div>
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>

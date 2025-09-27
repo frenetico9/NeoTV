@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useCallback } from 'react';
 import { Home, Tv, Film, Library, Settings, Search, Loader, Tv2 } from 'lucide-react';
 import { HomePage } from './pages/HomePage';
@@ -67,7 +68,6 @@ export default function App() {
           url={selectedStream.url}
           title={selectedStream.title}
           onBack={handleBack}
-          epg={selectedStream.epg}
           isFavorite={favorites.has(selectedStream.id)}
           onToggleFavorite={() => toggleFavorite(selectedStream.id)}
           onProgress={(progress) => updateHistory(selectedStream.id, progress)}

@@ -1,21 +1,20 @@
 
+
 import React from 'react';
 import { Player } from '../components/Player';
 import { ChevronLeft, Heart } from 'lucide-react';
-import type { EPGProgram } from '../types';
 
 interface PlayerPageProps {
   id: string;
   url: string;
   title: string;
   onBack: () => void;
-  epg?: EPGProgram[];
   isFavorite: boolean;
   onToggleFavorite: () => void;
   onProgress: (progress: number) => void;
 }
 
-export const PlayerPage: React.FC<PlayerPageProps> = ({ id, url, title, onBack, epg, isFavorite, onToggleFavorite, onProgress }) => {
+export const PlayerPage: React.FC<PlayerPageProps> = ({ id, url, title, onBack, isFavorite, onToggleFavorite, onProgress }) => {
   // A simple placeholder background. In a real app, this might be the VOD poster.
   const backgroundImageUrl = `https://picsum.photos/seed/${title}/1280/720`;
   
@@ -35,7 +34,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ id, url, title, onBack, 
         </button>
       </div>
       <div className="relative z-10 flex-grow">
-        <Player url={url} title={title} epg={epg} onProgress={onProgress} />
+        <Player url={url} title={title} onProgress={onProgress} />
       </div>
     </div>
   );
