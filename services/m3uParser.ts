@@ -218,4 +218,3 @@ self.onmessage = async (e) => {
     }
 };
 `
-}
