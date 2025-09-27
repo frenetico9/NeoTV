@@ -1,16 +1,14 @@
-
 import React, { useState, useCallback } from 'react';
-import type { Channel, VODItem, EPGProgram } from '../types';
+import type { Channel, Movie, Series, EPGProgram } from '../types';
 import { getAIRecommendations } from '../services/geminiService';
-import { Search, Loader, Wand2, Tv, Film } from 'lucide-react';
+import { Search, Loader, Wand2, Tv, Film, Tv2 } from 'lucide-react';
 
 interface GeminiSearchPageProps {
-  channels: Channel[];
-  vodItems: VODItem[];
+  db: any; // Simplified DB prop
   onPlay: (url: string, title: string, epg?: EPGProgram[]) => void;
 }
 
-export const GeminiSearchPage: React.FC<GeminiSearchPageProps> = ({ channels, vodItems, onPlay }) => {
+export const GeminiSearchPage: React.FC<GeminiSearchPageProps> = ({ db, onPlay }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -19,18 +17,46 @@ export const GeminiSearchPage: React.FC<GeminiSearchPageProps> = ({ channels, vo
     if (!query.trim()) return;
     setIsLoading(true);
     setResults(null);
-    const aiResults = await getAIRecommendations(query, channels, vodItems);
+
+    // Fetch a sample of data to provide context to the AI
+    const [sampleChannels, sampleMovies, sampleSeries] = await Promise.all([
+        db.getSample('channels', 50),
+        db.getSample('movies', 50),
+        db.getSample('series', 50),
+    ]);
+    
+    const aiResults = await getAIRecommendations(query, sampleChannels, sampleMovies, sampleSeries);
     setResults(aiResults);
     setIsLoading(false);
-  }, [query, channels, vodItems]);
+  }, [query, db]);
 
-  const handleRecommendationClick = (rec: { type: string; name: string }) => {
-    const item = rec.type === 'channel' 
-      ? channels.find(c => c.name === rec.name)
-      : vodItems.find(v => v.name === rec.name);
+  const handleRecommendationClick = async (rec: { type: string; name: string }) => {
+    // This part is tricky without a full DB search implemented.
+    // For this demo, we assume the name is unique.
+    // A real app would need a db.searchByName(name) method.
+    const [sampleChannels, sampleMovies, sampleSeries] = await Promise.all([
+        db.getSample('channels', 200),
+        db.getSample('movies', 200),
+        db.getSample('series', 200),
+    ]);
+
+    let item;
+    if (rec.type === 'channel') {
+      item = sampleChannels.find(c => c.name === rec.name);
+    } else if (rec.type === 'movie') {
+      item = sampleMovies.find(m => m.name === rec.name);
+    } else { // series
+      item = sampleSeries.find(s => s.name === rec.name);
+    }
     
     if (item) {
-      onPlay(item.url, item.name);
+      if ('url' in item) { // Channel or Movie
+        onPlay(item.url, item.name);
+      } else if ('seasons' in item) { // Series
+          alert("Playing series from search isn't supported yet. Please find it in the 'Séries' tab.");
+      }
+    } else {
+        alert("Could not play the selected item. Full search not implemented in this demo.");
     }
   };
 
@@ -39,7 +65,7 @@ export const GeminiSearchPage: React.FC<GeminiSearchPageProps> = ({ channels, vo
       <h1 className="text-3xl font-bold mb-2 flex items-center">
         <Wand2 className="mr-3 text-purple-400"/> AI Content Search
       </h1>
-      <p className="text-gray-400 mb-6">Ask for recommendations like "show me some action movies" or "what sports are on?".</p>
+      <p className="text-gray-400 mb-6">Ask for recommendations like "show me some action movies" or "any good sci-fi series?".</p>
 
       <div className="flex gap-2 mb-8">
         <div className="relative flex-grow">
@@ -83,7 +109,9 @@ export const GeminiSearchPage: React.FC<GeminiSearchPageProps> = ({ channels, vo
                   className="bg-gray-700 p-4 rounded-lg flex items-start gap-4 hover:bg-gray-600 cursor-pointer transition-colors"
                 >
                   <div className="flex-shrink-0 bg-purple-500/20 p-3 rounded-full">
-                    {rec.type === 'channel' ? <Tv className="text-purple-400" /> : <Film className="text-purple-400" />}
+                    {rec.type === 'channel' && <Tv className="text-purple-400" />}
+                    {rec.type === 'movie' && <Film className="text-purple-400" />}
+                    {rec.type === 'series' && <Tv2 className="text-purple-400" />}
                   </div>
                   <div>
                     <h3 className="font-bold text-lg">{rec.name}</h3>

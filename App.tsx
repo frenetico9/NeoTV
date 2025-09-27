@@ -1,11 +1,9 @@
-
-
 import React, { useState, useMemo, useCallback } from 'react';
-import { Home, Tv, Film, Library, Settings, Clapperboard, Search } from 'lucide-react';
+import { Home, Tv, Film, Library, Settings, Search, Loader, Tv2 } from 'lucide-react';
 import { HomePage } from './pages/HomePage';
 import { LiveTVPage } from './pages/LiveTVPage';
-import { VODPage } from './pages/VODPage';
-import { EPGPage } from './pages/EPGPage';
+import { MoviesPage } from './pages/VODPage';
+import { SeriesPage } from './pages/SeriesPage';
 import { PlayerPage } from './pages/PlayerPage';
 import { GeminiSearchPage } from './pages/GeminiSearchPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -14,7 +12,7 @@ import { LoginOverlay } from './components/LoginOverlay';
 import { useUserData } from './hooks/useUserData';
 import type { EPGProgram } from './types';
 
-type Page = 'home' | 'live' | 'vod' | 'epg' | 'search' | 'library' | 'settings';
+type Page = 'home' | 'live' | 'movies' | 'series' | 'search' | 'library' | 'settings';
 
 export default function App() {
   const {
@@ -27,21 +25,25 @@ export default function App() {
     toggleFavorite,
     history,
     updateHistory,
-    isLoading,
-    channels,
-    vodItems,
-    error,
+    loadingState,
+    channelGroups,
+    movieGroups,
+    seriesGroups,
+    db
   } = useUserData();
 
   const [currentPage, setCurrentPage] = useState<Page>('home');
   const [selectedStream, setSelectedStream] = useState<{ url: string; id: string; title: string; epg?: EPGProgram[] } | null>(null);
 
-  const handlePlay = useCallback((id: string, url: string, title: string, epg?: EPGProgram[]) => {
+  const handlePlay = useCallback(async (id: string, url: string, title: string, epg?: EPGProgram[]) => {
     setSelectedStream({ id, url, title, epg });
-    if (vodItems.some(v => v.id === id)) {
+    // Check if it's a Movie or Series Episode by trying to fetch it from the DB
+    const item = (await db.getItemsByIds([id]))[0];
+     // It's a Movie if it has a poster, or a Series Episode (we don't track progress for live channels)
+    if (item && ('poster' in item || 'season' in item)) { 
       updateHistory(id, 0); // Mark as started
     }
-  }, [vodItems, updateHistory]);
+  }, [db, updateHistory]);
   
   const handleBack = useCallback(() => {
     setSelectedStream(null);
@@ -50,7 +52,8 @@ export default function App() {
   const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
     { id: 'home', label: 'Home', icon: <Home size={24} /> },
     { id: 'live', label: 'Live TV', icon: <Tv size={24} /> },
-    { id: 'vod', label: 'VOD', icon: <Film size={24} /> },
+    { id: 'movies', label: 'Filmes', icon: <Film size={24} /> },
+    { id: 'series', label: 'Séries', icon: <Tv2 size={24} /> },
     { id: 'library', label: 'Library', icon: <Library size={24} /> },
     { id: 'search', label: 'AI Search', icon: <Search size={24} /> },
     { id: 'settings', label: 'Settings', icon: <Settings size={24} /> },
@@ -72,47 +75,46 @@ export default function App() {
       );
     }
 
-    if (isLoading) {
-        return <div className="flex justify-center items-center h-full"><p>Loading your content...</p></div>;
+    if (loadingState.status === 'parsing') {
+        return (
+            <div className="flex flex-col justify-center items-center h-full text-center p-4">
+                <Loader className="animate-spin w-12 h-12 text-purple-400 mb-4"/>
+                <p className="text-lg font-semibold">Loading your content...</p>
+                <p className="text-gray-400">{loadingState.message}</p>
+            </div>
+        );
     }
-    if (error) {
-        return <div className="flex justify-center items-center h-full p-4 text-center"><p className="text-red-400">{error}<br/>Please check the URL in Settings.</p></div>
+    if (loadingState.status === 'error') {
+        return <div className="flex justify-center items-center h-full p-4 text-center"><p className="text-red-400">{loadingState.message}<br/>Please check the URL in Settings.</p></div>
     }
-     if (isLoggedIn && (!m3uUrl || channels.length === 0)) {
+     if (isLoggedIn && (!m3uUrl || (channelGroups.length === 0 && movieGroups.length === 0 && seriesGroups.length === 0 && loadingState.status !== 'parsing'))) {
         return <SettingsPage m3uUrl={m3uUrl} setM3uUrl={setM3uUrl} onLogout={logout} isInitialSetup={true} />;
     }
 
-    const allProps = { channels, vodItems, onPlay: handlePlay, favorites, toggleFavorite, history };
+    const allProps = { db, onPlay: handlePlay, favorites, toggleFavorite, history };
 
     switch (currentPage) {
       case 'home':
-        return <HomePage {...allProps} />;
+        return <HomePage {...allProps} channelGroups={channelGroups} movieGroups={movieGroups} seriesGroups={seriesGroups} />;
       case 'live':
-        return <LiveTVPage channels={channels} onPlay={handlePlay} favorites={favorites} onToggleFavorite={toggleFavorite}/>;
-      case 'vod':
-        return <VODPage vodItems={vodItems} onPlay={handlePlay} favorites={favorites} onToggleFavorite={toggleFavorite}/>;
-      case 'epg':
-        return <EPGPage channels={channels} onPlay={(url, title, epg) => {
-            const channel = channels.find(c => c.url === url && c.name === title);
-            if (channel) {
-                handlePlay(channel.id, channel.url, channel.name, epg);
-            }
-        }} />;
+        return <LiveTVPage channelGroups={channelGroups} onPlay={handlePlay} favorites={favorites} onToggleFavorite={toggleFavorite} db={db} />;
+      case 'movies':
+        return <MoviesPage movieGroups={movieGroups} onPlay={handlePlay} favorites={favorites} onToggleFavorite={toggleFavorite} db={db}/>;
+      case 'series':
+        return <SeriesPage seriesGroups={seriesGroups} onPlay={handlePlay} favorites={favorites} onToggleFavorite={toggleFavorite} db={db}/>;
       case 'search':
-        return <GeminiSearchPage channels={channels} vodItems={vodItems} onPlay={(url, title, epg) => {
-            const item = [...channels, ...vodItems].find(i => i.url === url && i.name === title);
-            if(item) {
-                handlePlay(item.id, item.url, item.name, epg);
-            }
+        return <GeminiSearchPage db={db} onPlay={(url, title, epg) => {
+            // This logic might need adjustment since we don't have all items in memory
+            handlePlay("search-item", url, title, epg);
         }} />;
       case 'library':
         return <LibraryPage {...allProps} />;
       case 'settings':
         return <SettingsPage m3uUrl={m3uUrl} setM3uUrl={setM3uUrl} onLogout={logout} />;
       default:
-        return <HomePage {...allProps} />;
+        return <HomePage {...allProps} channelGroups={channelGroups} movieGroups={movieGroups} seriesGroups={seriesGroups} />;
     }
-  }, [currentPage, selectedStream, channels, vodItems, isLoading, error, m3uUrl, favorites, history, handleBack, handlePlay, toggleFavorite, updateHistory, setM3uUrl, logout, isLoggedIn]);
+  }, [currentPage, selectedStream, loadingState, m3uUrl, channelGroups, movieGroups, seriesGroups, favorites, history, handleBack, handlePlay, toggleFavorite, updateHistory, setM3uUrl, logout, isLoggedIn, db]);
   
   if (!isLoggedIn) {
     return <LoginOverlay onLogin={login} />;
@@ -121,7 +123,7 @@ export default function App() {
   return (
     <div className="bg-gray-900 text-white min-h-screen font-inter flex flex-col">
       <header className="flex items-center p-4 bg-gray-900/80 backdrop-blur-sm sticky top-0 z-20 border-b border-gray-800">
-        <Clapperboard className="text-purple-500" size={32} />
+        <Tv className="text-purple-500" size={32} />
         <h1 className="text-2xl font-bold ml-3 tracking-tight">UniTV Stream</h1>
       </header>
 

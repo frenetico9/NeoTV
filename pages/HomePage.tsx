@@ -1,15 +1,17 @@
-
-import React, { useMemo } from 'react';
-import type { Channel, VODItem, EPGProgram, HistoryItem } from '../types';
+import React, { useState, useEffect } from 'react';
+import type { Channel, Movie, Series, EPGProgram, HistoryItem } from '../types';
+import { isMovie, isSeries, isChannel } from '../types';
 import { PlayCircle } from 'lucide-react';
 import { FavoriteButton } from '../components/FavoriteButton';
 
 interface HomePageProps {
-  channels: Channel[];
-  vodItems: VODItem[];
+  channelGroups: string[];
+  movieGroups: string[];
+  seriesGroups: string[];
+  db: any; 
   onPlay: (id: string, url: string, title: string, epg?: EPGProgram[]) => void;
   favorites: Set<string>;
-  toggleFavorite: (id: string) => void;
+  toggleFavorite: (id:string) => void;
   history: HistoryItem[];
 }
 
@@ -35,7 +37,7 @@ const ChannelCard: React.FC<{ channel: Channel; onPlay: () => void; isFavorite: 
   </div>
 );
 
-const VODCard: React.FC<{ item: VODItem; onPlay: () => void; isFavorite: boolean; onToggleFavorite: () => void; progress?: number; }> = ({ item, onPlay, isFavorite, onToggleFavorite, progress = 0 }) => (
+const MovieCard: React.FC<{ item: Movie; onPlay: () => void; isFavorite: boolean; onToggleFavorite: () => void; progress?: number; }> = ({ item, onPlay, isFavorite, onToggleFavorite, progress = 0 }) => (
   <div className="flex-shrink-0 w-40 rounded-lg shadow-lg transform hover:scale-105 transition-transform duration-200 group relative overflow-hidden">
     <FavoriteButton isFavorite={isFavorite} onToggle={onToggleFavorite} />
     <div onClick={onPlay} className="cursor-pointer">
@@ -56,21 +58,37 @@ const VODCard: React.FC<{ item: VODItem; onPlay: () => void; isFavorite: boolean
   </div>
 );
 
-const HeroCarousel: React.FC<{ items: VODItem[]; onPlay: (id: string, url: string, title: string) => void }> = ({ items, onPlay }) => {
+const SeriesCard: React.FC<{ item: Series; isFavorite: boolean; onToggleFavorite: () => void; }> = ({ item, isFavorite, onToggleFavorite }) => (
+  <div className="flex-shrink-0 w-40 rounded-lg shadow-lg transform hover:scale-105 transition-transform duration-200 group relative overflow-hidden">
+    <FavoriteButton isFavorite={isFavorite} onToggle={onToggleFavorite} />
+    <div className="cursor-pointer">
+      <img src={item.poster} alt={item.name} className="w-full h-60 object-cover" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent p-2 flex flex-col justify-end">
+        <h3 className="font-bold line-clamp-2">{item.name}</h3>
+        <p className="text-xs text-gray-300">{item.year}</p>
+      </div>
+       <div className="absolute top-2 left-2 bg-purple-600 text-white text-xs font-bold px-2 py-1 rounded-md">SÉRIE</div>
+    </div>
+  </div>
+);
+
+
+const HeroCarousel: React.FC<{ items: (Movie | Series)[]; onPlay: (id: string, url: string, title: string) => void }> = ({ items, onPlay }) => {
     if (items.length === 0) return null;
     const featuredItem = items[0];
+    if (!isMovie(featuredItem)) return null; // Only feature movies in hero
 
     return (
         <div className="relative h-96 w-full mb-8">
             <img src={featuredItem.poster} alt={featuredItem.name} className="w-full h-full object-cover object-center absolute inset-0"/>
-            <div className="absolute inset-0 bg-black/50 backdrop-blur-xl"></div>
-            <div className="relative z-10 h-full flex items-center p-8">
-                <div className="w-1/3 flex-shrink-0">
-                   <img src={featuredItem.poster} alt={featuredItem.name} className="rounded-xl shadow-2xl w-full h-auto object-contain max-h-[320px]"/>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/50"></div>
+            <div className="relative z-10 h-full flex items-end p-8">
+                <div className="w-1/4 flex-shrink-0 max-w-xs">
+                   <img src={featuredItem.poster} alt={featuredItem.name} className="rounded-xl shadow-2xl w-full h-auto object-contain"/>
                 </div>
-                <div className="ml-8 text-white">
-                    <h1 className="text-5xl font-extrabold mb-2 text-shadow-lg">{featuredItem.name}</h1>
-                    <p className="text-lg text-gray-200 mb-4 line-clamp-3">{featuredItem.description}</p>
+                <div className="ml-8 text-white flex-grow">
+                    <h1 className="text-5xl font-extrabold mb-2 text-shadow-lg" style={{textShadow: '2px 2px 8px rgba(0,0,0,0.7)'}}>{featuredItem.name}</h1>
+                    <p className="text-lg text-gray-200 mb-4 line-clamp-3 max-w-2xl">{featuredItem.description}</p>
                     <div className="flex space-x-2 mb-4">
                         {featuredItem.genre.map(g => <span key={g} className="bg-white/20 text-xs font-semibold px-2 py-1 rounded-full">{g}</span>)}
                     </div>
@@ -84,44 +102,101 @@ const HeroCarousel: React.FC<{ items: VODItem[]; onPlay: (id: string, url: strin
     );
 };
 
-export const HomePage: React.FC<HomePageProps> = ({ channels, vodItems, onPlay, favorites, toggleFavorite, history }) => {
-  const groupedChannels = useMemo(() => {
-    return channels.reduce((acc, channel) => {
-      const group = channel.group || 'General';
-      if (!acc[group]) acc[group] = [];
-      acc[group].push(channel);
-      return acc;
-    }, {} as Record<string, Channel[]>);
-  }, [channels]);
-  
-  const groupedVods = useMemo(() => {
-    return vodItems.reduce((acc, vod) => {
-      const group = vod.group.split('|')[1]?.trim() || 'VOD';
-      if (!acc[group]) acc[group] = [];
-      acc[group].push(vod);
-      return acc;
-    }, {} as Record<string, VODItem[]>);
-  }, [vodItems]);
+// Fix: Add explicit props interface for DataSection component.
+interface DataSectionProps {
+  db: any;
+  type: 'channels' | 'movies' | 'series';
+  group: string;
+  onPlay: (id: string, url: string, title: string, epg?: EPGProgram[]) => void;
+  favorites: Set<string>;
+  toggleFavorite: (id: string) => void;
+}
 
-  const continueWatchingItems = useMemo(() => {
-      return history
-        .filter(h => h.progress < 0.95) // Filter out finished items
-        .sort((a, b) => b.watchedAt - a.watchedAt)
-        .map(h => {
-            const vodItem = vodItems.find(v => v.id === h.id);
-            return vodItem ? { ...vodItem, progress: h.progress } : null;
-        })
-        .filter(Boolean) as (VODItem & { progress: number })[];
-  }, [history, vodItems]);
+const DataSection: React.FC<DataSectionProps> = ({ db, type, group, onPlay, favorites, toggleFavorite }) => {
+    const [items, setItems] = useState<(Channel[] | Movie[] | Series[])>([]);
+
+    useEffect(() => {
+        db.getItemsByGroup(type, group, 1, 20).then(setItems); // Fetch first 20 items for home page
+    }, [db, type, group]);
+
+    if (items.length === 0) return null;
+
+    return (
+        <Section title={group}>
+            {items.map(item => {
+                 if (type === 'channels') return (
+                    <ChannelCard 
+                        key={item.id} 
+                        channel={item as Channel} 
+                        onPlay={() => onPlay(item.id, item.url, item.name)} 
+                        isFavorite={favorites.has(item.id)}
+                        onToggleFavorite={() => toggleFavorite(item.id)}
+                    />
+                );
+                if (type === 'movies') return (
+                    <MovieCard 
+                        key={item.id} 
+                        item={item as Movie} 
+                        onPlay={() => onPlay(item.id, item.url, item.name)}
+                        isFavorite={favorites.has(item.id)}
+                        onToggleFavorite={() => toggleFavorite(item.id)}
+                     />
+                );
+                if (type === 'series') return (
+                     <SeriesCard
+                        key={item.id} 
+                        item={item as Series} 
+                        isFavorite={favorites.has(item.id)}
+                        onToggleFavorite={() => toggleFavorite(item.id)}
+                     />
+                )
+                return null;
+            })}
+        </Section>
+    )
+}
+
+export const HomePage: React.FC<HomePageProps> = ({ db, channelGroups, movieGroups, seriesGroups, onPlay, favorites, toggleFavorite, history }) => {
+    const [heroItems, setHeroItems] = useState<Movie[]>([]);
+    const [continueWatchingItems, setContinueWatchingItems] = useState<(Movie & { progress: number })[]>([]);
+
+    useEffect(() => {
+        db.getSample('movies', 5).then(setHeroItems);
+    }, [db]);
+    
+    useEffect(() => {
+        const fetchHistoryItems = async () => {
+            const watchedIds = history
+                .filter(h => h.progress < 0.95)
+                .sort((a, b) => b.watchedAt - a.watchedAt)
+                .map(h => h.id);
+            
+            if (watchedIds.length > 0) {
+                const items = await db.getItemsByIds(watchedIds);
+                const itemMap = new Map(items.map(item => [item.id, item]));
+                const hydratedHistory = history
+                    .map(h => {
+                        const dbItem = itemMap.get(h.id);
+                        if(dbItem && isMovie(dbItem)) {
+                           return { ...dbItem, progress: h.progress };
+                        }
+                        return null;
+                    })
+                    .filter(Boolean) as (Movie & { progress: number })[];
+                setContinueWatchingItems(hydratedHistory);
+            }
+        };
+        fetchHistoryItems();
+    }, [history, db]);
 
   return (
     <div className="pt-4">
-      <HeroCarousel items={vodItems.slice(0, 5)} onPlay={onPlay} />
+      <HeroCarousel items={heroItems} onPlay={onPlay} />
 
       {continueWatchingItems.length > 0 && (
           <Section title="Continue Watching">
               {continueWatchingItems.map(item => (
-                  <VODCard 
+                  <MovieCard 
                     key={item.id} 
                     item={item} 
                     onPlay={() => onPlay(item.id, item.url, item.name)}
@@ -132,34 +207,19 @@ export const HomePage: React.FC<HomePageProps> = ({ channels, vodItems, onPlay, 
               ))}
           </Section>
       )}
-
-      {Object.entries(groupedChannels).map(([group, items]) => (
-        <Section key={group} title={group}>
-          {items.map(channel => (
-            <ChannelCard 
-                key={channel.id} 
-                channel={channel} 
-                onPlay={() => onPlay(channel.id, channel.url, channel.name)} 
-                isFavorite={favorites.has(channel.id)}
-                onToggleFavorite={() => toggleFavorite(channel.id)}
-            />
-          ))}
-        </Section>
+      {/* Fix: Pass props explicitly to DataSection to resolve typing error. */}
+      {channelGroups.map(group => (
+          <DataSection key={`ch-${group}`} db={db} type="channels" group={group} onPlay={onPlay} favorites={favorites} toggleFavorite={toggleFavorite} />
       ))}
 
-      {Object.entries(groupedVods).map(([group, items]) => (
-        <Section key={group} title={group}>
-          {items.map(vod => (
-            <VODCard 
-                key={vod.id} 
-                item={vod} 
-                onPlay={() => onPlay(vod.id, vod.url, vod.name)}
-                isFavorite={favorites.has(vod.id)}
-                onToggleFavorite={() => toggleFavorite(vod.id)}
-             />
-          ))}
-        </Section>
+      {movieGroups.map(group => (
+          <DataSection key={`mov-${group}`} db={db} type="movies" group={group} onPlay={onPlay} favorites={favorites} toggleFavorite={toggleFavorite} />
       ))}
+
+      {seriesGroups.map(group => (
+          <DataSection key={`ser-${group}`} db={db} type="series" group={group} onPlay={onPlay} favorites={favorites} toggleFavorite={toggleFavorite} />
+      ))}
+
     </div>
   );
 };

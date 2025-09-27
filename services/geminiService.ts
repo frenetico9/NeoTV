@@ -1,6 +1,5 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import type { Channel, VODItem } from '../types';
+import type { Channel, Movie, Series } from '../types';
 
 if (!process.env.API_KEY) {
   // This is a placeholder for development. In a real app, the key should be set in the environment.
@@ -9,7 +8,7 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "YOUR_API_KEY_HERE" });
 
-export const getAIRecommendations = async (query: string, channels: Channel[], vodItems: VODItem[]): Promise<any> => {
+export const getAIRecommendations = async (query: string, channels: Channel[], movies: Movie[], series: Series[]): Promise<any> => {
   if (!process.env.API_KEY && "YOUR_API_KEY_HERE" === "YOUR_API_KEY_HERE") {
       return { 
           reasoning: "API Key not configured. Please add your Gemini API key in `services/geminiService.ts` to enable this feature.",
@@ -23,8 +22,11 @@ export const getAIRecommendations = async (query: string, channels: Channel[], v
     Available Live TV Channels:
     ${channels.map(c => `- ${c.name} (Category: ${c.group})`).join('\n')}
 
-    Available VOD (Video on Demand):
-    ${vodItems.map(v => `- ${v.name} (Category: ${v.group}, Genre: ${v.genre.join(', ')})`).join('\n')}
+    Available Movies:
+    ${movies.map(m => `- ${m.name} (Category: ${m.group}, Genre: ${m.genre.join(', ')})`).join('\n')}
+    
+    Available Series:
+    ${series.map(s => `- ${s.name} (Category: ${s.group}, Genre: ${s.genre.join(', ')})`).join('\n')}
   `;
 
   const prompt = `
@@ -60,11 +62,11 @@ export const getAIRecommendations = async (query: string, channels: Channel[], v
                 properties: {
                   type: {
                     type: Type.STRING,
-                    description: "The type of content, either 'channel' or 'vod'."
+                    description: "The type of content, either 'channel', 'movie', or 'series'."
                   },
                   name: {
                     type: Type.STRING,
-                    description: "The name of the recommended channel or VOD item."
+                    description: "The name of the recommended channel, movie, or series."
                   },
                   reason: {
                     type: Type.STRING,

@@ -1,4 +1,3 @@
-
 import React from 'react';
 import type { Channel, EPGProgram } from '../types';
 import { MOCK_EPG_DATA } from '../constants';
@@ -10,6 +9,10 @@ interface EPGPageProps {
 }
 
 export const EPGPage: React.FC<EPGPageProps> = ({ channels, onPlay }) => {
+  // NOTE: This component is not optimized for large playlists and has been temporarily simplified
+  // in the main App.tsx. A proper implementation would require fetching channels
+  // with virtualization, similar to the LiveTVPage.
+
   const timeSlots = Array.from({ length: 12 }, (_, i) => {
     const hour = 16 + i;
     return `${hour.toString().padStart(2, '0')}:00`;
@@ -32,7 +35,7 @@ export const EPGPage: React.FC<EPGPageProps> = ({ channels, onPlay }) => {
 
           {/* Body */}
           <div>
-            {channels.map(channel => {
+            {channels.slice(0, 50).map(channel => { // Only show first 50 channels to prevent crash
               const epgData = MOCK_EPG_DATA[channel.id] || [];
               return (
                 <div key={channel.id} className="flex border-b border-gray-700">

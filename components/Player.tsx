@@ -27,21 +27,69 @@ export const Player: React.FC<PlayerProps> = ({ url, title, epg, onProgress }) =
     const videoElement = videoRef.current;
 
     const startPlayback = () => {
-        videoElement?.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+        videoElement?.play().then(() => setIsPlaying(true)).catch((err) => {
+            console.warn("Autoplay was prevented:", err);
+            setIsPlaying(false)
+        });
     }
 
+    const onVideoError = (e: Event) => {
+        if (!videoElement) return;
+        switch (videoElement.error?.code) {
+            case videoElement.error?.MEDIA_ERR_ABORTED:
+                console.error('Video playback aborted.');
+                break;
+            case videoElement.error?.MEDIA_ERR_NETWORK:
+                console.error('A network error caused video download to fail.');
+                break;
+            case videoElement.error?.MEDIA_ERR_DECODE:
+                console.error('Video decoding error.');
+                break;
+            case videoElement.error?.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                console.error('The video source is not supported.');
+                break;
+            default:
+                console.error('An unknown video error occurred.');
+                break;
+        }
+    };
+
     if (videoElement) {
-      if (Hls.isSupported() && url.includes('.m3u8')) {
-        hls = new Hls();
+      videoElement.addEventListener('error', onVideoError);
+      
+      const urlLower = url.toLowerCase();
+      const isDirectPlayable = urlLower.endsWith('.mp4') || urlLower.endsWith('.webm') || urlLower.endsWith('.ogg');
+      
+      if (Hls.isSupported() && !isDirectPlayable) {
+        hls = new Hls({
+            fragLoadingMaxRetry: 4,
+            manifestLoadingMaxRetry: 4,
+        });
         hls.loadSource(url);
         hls.attachMedia(videoElement);
         hls.on(Hls.Events.MANIFEST_PARSED, startPlayback);
-      } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-        videoElement.src = url;
-        videoElement.addEventListener('loadedmetadata', startPlayback);
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          console.error('HLS.js Error:', data);
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.error('Fatal network error encountered, trying to recover...');
+                hls?.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.error('Fatal media error encountered, trying to recover...');
+                hls?.recoverMediaError();
+                break;
+              default:
+                console.error('Unrecoverable HLS error, destroying instance.');
+                hls?.destroy();
+                break;
+            }
+          }
+        });
       } else {
         videoElement.src = url;
-        startPlayback();
+        videoElement.addEventListener('loadedmetadata', startPlayback);
       }
     }
     
@@ -56,10 +104,11 @@ export const Player: React.FC<PlayerProps> = ({ url, title, epg, onProgress }) =
 
 
     return () => {
+      if (videoElement) videoElement.removeEventListener('error', onVideoError);
       if (hls) hls.destroy();
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
     };
-  }, [url]);
+  }, [url, onProgress]);
 
   const resetControlsTimeout = () => {
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
