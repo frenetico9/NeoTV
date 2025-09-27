@@ -17,6 +17,20 @@ interface PlayerPageProps {
 export const PlayerPage: React.FC<PlayerPageProps> = ({ id, url, title, onBack, isFavorite, onToggleFavorite, onProgress }) => {
   // A simple placeholder background. In a real app, this might be the VOD poster.
   const backgroundImageUrl = `https://picsum.photos/seed/${title}/1280/720`;
+
+  // Prepending a CORS proxy to the stream URL to mitigate network/CORS errors.
+  // This is a common workaround for web-based IPTV players when the stream
+  // provider does not set the correct CORS headers.
+  // Using public proxies can be unreliable; a self-hosted proxy is a more robust solution.
+  const getProxiedUrl = (streamUrl: string): string => {
+    if (streamUrl.startsWith('http://') || streamUrl.startsWith('https://')) {
+        // Use a CORS proxy. Using https for the proxy avoids mixed-content browser errors.
+        return `https://cors.sh/${streamUrl}`;
+    }
+    return streamUrl;
+  };
+  
+  const proxiedUrl = getProxiedUrl(url);
   
   return (
     <div className="fixed inset-0 bg-black z-50 flex flex-col">
@@ -34,7 +48,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({ id, url, title, onBack, 
         </button>
       </div>
       <div className="relative z-10 flex-grow">
-        <Player url={url} title={title} onProgress={onProgress} />
+        <Player url={proxiedUrl} title={title} onProgress={onProgress} />
       </div>
     </div>
   );
