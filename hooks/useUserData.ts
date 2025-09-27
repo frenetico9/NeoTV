@@ -5,7 +5,6 @@ import { parseM3U } from '../services/m3uParser';
 import { MOCK_M3U_DATA } from '../constants'; // For fallback/demo
 
 // --- Local Storage Service ---
-// In a real app, you would replace these functions with calls to a cloud service like Supabase or Firebase.
 const storage = {
   get: <T>(key: string, defaultValue: T): T => {
     try {
@@ -24,11 +23,38 @@ const storage = {
   }
 };
 
-// A list of public CORS proxies to try in sequence.
-const PROXY_URLS = [
-    `https://api.allorigins.win/raw?url=`,
-    `https://api.codetabs.com/v1/proxy?quest=` // Fallback proxy
+// --- Caching and Fetching Configuration ---
+const CACHE_EXPIRATION_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+// A list of proxy functions to try in parallel.
+const PROXY_URL_BUILDERS = [
+    (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    (url: string) => `https://cors.sh/${url}`, // This proxy doesn't need encoding
+    (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
 ];
+
+// Fix for: Property 'any' does not exist on type 'PromiseConstructor'.
+// A simplified Promise.any polyfill to support older TypeScript/JavaScript environments.
+const promiseAny = <T>(promises: Promise<T>[]): Promise<T> => {
+    return new Promise((resolve, reject) => {
+        if (!promises || promises.length === 0) {
+            return reject(new Error('No promises were provided.'));
+        }
+
+        let pending = promises.length;
+        const errors: any[] = new Array(promises.length);
+
+        promises.forEach((promise, i) => {
+            Promise.resolve(promise).then(resolve).catch(err => {
+                errors[i] = err;
+                pending--;
+                if (pending === 0) {
+                    reject(new Error('All promises were rejected.'));
+                }
+            });
+        });
+    });
+};
 
 export const useUserData = () => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => storage.get('isLoggedIn', false));
@@ -41,81 +67,110 @@ export const useUserData = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchAndParseM3U = useCallback(async (url: string) => {
-    if (!url) {
-      // Use mock data if no URL is provided, to show a demo.
-      const { channels: parsedChannels, vodItems: parsedVODs } = parseM3U(MOCK_M3U_DATA);
+  const fetchAndParseM3U = useCallback(async (url: string, isBackgroundRefresh = false) => {
+    if (!isBackgroundRefresh) {
+      setIsLoading(true);
+      setError(null);
+    }
+
+    const fetchWithTimeout = (fetchUrl: string, timeout = 15000): Promise<Response> => {
+      return new Promise((resolve, reject) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`Request timed out after ${timeout / 1000}s`));
+        }, timeout);
+
+        fetch(fetchUrl, { signal: controller.signal })
+          .then(response => {
+            clearTimeout(timeoutId);
+            resolve(response);
+          })
+          .catch(error => {
+            clearTimeout(timeoutId);
+            reject(error);
+          });
+      });
+    };
+
+    const fetchPromises = PROXY_URL_BUILDERS.map(builder =>
+      fetchWithTimeout(builder(url))
+        .then(async response => {
+          if (!response.ok) {
+            throw new Error(`Proxy error: Status ${response.status}`);
+          }
+          const text = await response.text();
+          if (!text || !text.trim().startsWith('#EXTM3U')) {
+            throw new Error('Invalid M3U data received from proxy.');
+          }
+          return text;
+        })
+    );
+
+    try {
+      // Promise.any resolves with the first promise that fulfills.
+      // FIX: Replaced Promise.any with a polyfill for compatibility.
+      const m3uData = await promiseAny(fetchPromises);
+      const { channels: parsedChannels, vodItems: parsedVODs } = parseM3U(m3uData);
+      
+      if (parsedChannels.length === 0 && parsedVODs.length === 0) {
+        throw new Error("The M3U playlist is empty or could not be parsed correctly.");
+      }
+
       setChannels(parsedChannels);
       setVODItems(parsedVODs);
-      setIsLoading(false);
-      return;
+      setError(null); // Clear previous errors on success
+
+      // Save to cache
+      const cacheKey = `m3u_cache_${url}`;
+      storage.set(cacheKey, {
+        timestamp: Date.now(),
+        channels: parsedChannels,
+        vodItems: parsedVODs,
+      });
+
+    } catch (e) {
+      console.error("All proxies failed to fetch the M3U playlist.", e);
+      // Only show an error if there's no cached data to display.
+      // This prevents showing an error during a failed background refresh.
+      const cacheKey = `m3u_cache_${url}`;
+      const cachedData = storage.get(cacheKey, null);
+      if (!cachedData) {
+        setError("Failed to load playlist. Please check the URL and your network connection. The playlist provider might be down or blocking access.");
+      }
+    } finally {
+      if (!isBackgroundRefresh) {
+        setIsLoading(false);
+      }
     }
-
-    setIsLoading(true);
-    setError(null);
-    let lastError: Error | null = null;
-
-    for (const proxy of PROXY_URLS) {
-        try {
-            const proxyUrl = `${proxy}${encodeURIComponent(url)}`;
-            const response = await fetch(proxyUrl);
-
-            if (!response.ok) {
-                // This is a specific HTTP error. It's unlikely a different proxy will fix a 404 or 403 on the target URL.
-                // We should fail fast and report this specific error.
-                let errorMessage = `Failed to fetch playlist. Status: ${response.status}.`;
-                if (response.status === 403) {
-                    errorMessage = `Access to the playlist was forbidden (Status: 403). The server may be blocking our proxy services.`;
-                } else if (response.status === 404) {
-                    errorMessage = `Playlist not found at the provided URL (Status: 404). Please check the URL.`;
-                }
-                throw new Error(errorMessage); // This will be caught and will become the final error.
-            }
-
-            const m3uData = await response.text();
-            if (!m3uData || !m3uData.trim().startsWith('#EXTM3U')) {
-                throw new Error("Invalid M3U data received. The file might be empty, not a valid playlist, or a proxy failed to return correct data.");
-            }
-
-            const { channels: parsedChannels, vodItems: parsedVODs } = parseM3U(m3uData);
-            setChannels(parsedChannels);
-            setVODItems(parsedVODs);
-            setError(null); // Clear previous errors on success
-            setIsLoading(false);
-            return; // Success! Exit the function.
-
-        } catch (e) {
-            console.warn(`M3U fetch failed with proxy ${proxy}.`, e);
-            if (e instanceof Error) {
-                lastError = e;
-                // If the error is NOT a generic network error (like "Failed to fetch"), we should stop trying other proxies.
-                if (!e.message.includes('Failed to fetch')) {
-                    break;
-                }
-            }
-        }
-    }
-    
-    // If we've exited the loop, it means all attempts failed.
-    console.error("All proxies failed.", lastError);
-    if (lastError) {
-        if (lastError.message.includes('Failed to fetch')) {
-            setError("Failed to fetch the playlist. This could be due to a network issue, an ad-blocker, or our proxy services being temporarily unavailable. Please check your connection and try again.");
-        } else {
-            setError(lastError.message);
-        }
-    } else {
-        setError("Could not load your playlist. An unknown error occurred.");
-    }
-    
-    setChannels([]);
-    setVODItems([]);
-    setIsLoading(false);
   }, []);
 
   useEffect(() => {
     if (isLoggedIn) {
-      fetchAndParseM3U(m3uUrl);
+      if (m3uUrl) {
+        const cacheKey = `m3u_cache_${m3uUrl}`;
+        const cachedData = storage.get<{ timestamp: number; channels: Channel[]; vodItems: VODItem[]; } | null>(cacheKey, null);
+
+        if (cachedData) {
+          setChannels(cachedData.channels);
+          setVODItems(cachedData.vodItems);
+          setIsLoading(false); // Instantly loaded from cache
+
+          // Refresh in background if cache is stale
+          if (Date.now() - cachedData.timestamp > CACHE_EXPIRATION_MS) {
+            fetchAndParseM3U(m3uUrl, true);
+          }
+        } else {
+          // No cache, perform initial fetch
+          fetchAndParseM3U(m3uUrl, false);
+        }
+      } else {
+        // No URL provided, use mock data for demo
+        const { channels: parsedChannels, vodItems: parsedVODs } = parseM3U(MOCK_M3U_DATA);
+        setChannels(parsedChannels);
+        setVODItems(parsedVODs);
+        setIsLoading(false);
+      }
     } else {
       setIsLoading(false);
     }
@@ -135,13 +190,19 @@ export const useUserData = () => {
     setVODItems([]);
     // Clear all user data from storage
     Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('isLoggedIn') || key.startsWith('m3uUrl') || key.startsWith('favorites') || key.startsWith('history')) {
-            localStorage.removeItem(key);
-        }
+      if (['isLoggedIn', 'm3uUrl', 'favorites', 'history'].includes(key) || key.startsWith('m3u_cache_')) {
+        localStorage.removeItem(key);
+      }
     });
   };
 
   const setM3uUrl = (url: string) => {
+    const currentUrl = storage.get('m3uUrl', '');
+    if (url !== currentUrl) {
+      setChannels([]);
+      setVODItems([]);
+      setIsLoading(true); // Show loader immediately when URL changes
+    }
     setM3uUrlState(url);
     storage.set('m3uUrl', url);
   };
@@ -166,18 +227,15 @@ export const useUserData = () => {
       let newHistory = [...prev];
 
       if (itemIndex > -1) {
-        // Update existing item if new progress is greater
-        if(progress > newHistory[itemIndex].progress) {
-            newHistory[itemIndex] = { ...newHistory[itemIndex], progress, watchedAt: now };
+        if (progress > newHistory[itemIndex].progress) {
+          newHistory[itemIndex] = { ...newHistory[itemIndex], progress, watchedAt: now };
         } else {
-            // Also update timestamp even if progress didn't increase, to mark it as recently watched
-            newHistory[itemIndex] = { ...newHistory[itemIndex], watchedAt: now };
+          newHistory[itemIndex] = { ...newHistory[itemIndex], watchedAt: now };
         }
       } else {
-        // Add new item
         newHistory.push({ id, progress, watchedAt: now });
       }
-      // Sort by most recently watched
+      
       newHistory.sort((a, b) => b.watchedAt - a.watchedAt);
       storage.set('history', newHistory);
       return newHistory;
